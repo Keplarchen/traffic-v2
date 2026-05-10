@@ -1,0 +1,6 @@
+Horizon_steps,Horizon_min,Method,SLA_pct,Util_pct,Avg_alloc_Mbps,Avg_overprov_Mbps
+16,240,Static Peak,0.01,3.81,2141.38,2059.81
+16,240,Static P95,6.17,28.16,289.68,213.51
+16,240,Naive Last (resid),4.04,50.14,162.71,83.89
+16,240,Seasonal Naive (resid),3.47,35.57,229.35,150.12
+16,240,Transformer (P95),5.79,36.73,222.09,142.90

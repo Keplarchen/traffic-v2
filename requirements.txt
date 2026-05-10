@@ -1,0 +1,14 @@
+# 项目核心依赖 (跟 PROJECT_CONTEXT.md §7 配合用)
+#
+# PyTorch 必须装 GPU 版本, requirements.txt 没法直接搞定.
+# 装法 (RTX 4060 + CUDA 12.4 验证过):
+#   pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+#
+# 验证:
+#   python -c "import torch; print(torch.cuda.is_available())"
+#   应该输出 True
+
+torch>=2.6.0
+numpy>=2.0
+scikit-learn>=1.5
+matplotlib>=3.10
