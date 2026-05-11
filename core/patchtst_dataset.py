@@ -15,7 +15,7 @@ from torch.utils.data import Dataset
 
 class PatchTSTDataset(Dataset):
     def __init__(self, all_pt_path, split: str,
-                 seq_len: int = 672, horizons=(16,)):
+                 seq_len: int = 96, horizons=(1,)):
         d = torch.load(all_pt_path, map_location="cpu", weights_only=False)
         self.flows_z = d["flows_z"]                       # [T, n_channels]
         self.seq_len = seq_len
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     pt_path = Path(__file__).resolve().parents[1] / "data" / "processed" / "all.pt"
 
     for split in ("train", "val", "test"):
-        ds = PatchTSTDataset(pt_path, split, seq_len=672, horizons=(16,))
+        ds = PatchTSTDataset(pt_path, split, seq_len=96, horizons=(1,))
         x, y = ds[0]
         loader = DataLoader(ds, batch_size=4, shuffle=False)
         bx, by = next(iter(loader))

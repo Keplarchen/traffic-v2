@@ -1,4 +1,4 @@
-"""6 张评估图. 读 preds.npz, 输出到 figures/.
+"""5 张评估图. 读 preds.npz, 输出到 figures/.
 
 每个 plot_xxx 独立可调用. 直接 python plots.py 跑全部.
 """
@@ -16,12 +16,12 @@ FIG_DIR = HERE / "figures"
 FIG_DIR.mkdir(exist_ok=True)
 
 DISPLAY = {
-    "static_peak":            "Static Peak",
-    "static_p95":             "Static P95",
-    "naive_last":             "Naive Last (resid)",
-    "seasonal_naive":         "Seasonal Naive (resid)",
-    "transformer":            "Transformer (P95)",
-    "transformer_conformal":  "Transformer + Conformal",
+    "static_peak":         "Static Peak",
+    "static_p95":          "Static P95",
+    "naive_last":          "Naive Last (resid)",
+    "seasonal_naive":      "Seasonal Naive (resid)",
+    "patchtst":            "PatchTST (P95)",
+    "patchtst_conformal":  "PatchTST + Conformal",
 }
 ALLOC_KEYS = list(DISPLAY.keys())
 
@@ -125,11 +125,7 @@ def plot_pareto_per_horizon(d):
 
 
 def plot_violation_severity_cdf(d):
-    """每 horizon 一个 panel: 违约严重度 CDF (log x). 突出 ViolSize 优势.
-
-    每个方法收集所有 (actual - alloc) > 0 的违约量, 画 CDF.
-    Transformer 的曲线越早爬到 1.0, 说明严重违约越少.
-    """
+    """每 horizon 一个 panel: 违约严重度 CDF (log x). 突出 ViolSize 优势."""
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
@@ -164,11 +160,7 @@ def plot_violation_severity_cdf(d):
 
 
 def plot_per_sd_sla_sorted(d):
-    """每 horizon 一个 panel: 462 个 pair 按 per-pair SLA 降序画曲线.
-
-    一图同时展示 %Pair>5% (5% 横线之上面积) 和 WorstPair% (最左点).
-    Transformer 的曲线在右侧应该最低 = 长尾控制最好.
-    """
+    """每 horizon 一个 panel: 462 个 pair 按 per-pair SLA 降序画曲线."""
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
@@ -197,11 +189,7 @@ def plot_per_sd_sla_sorted(d):
 
 
 def plot_cumulative_unmet(d):
-    """每 horizon 一个 panel: 测试集上累积未满足需求随时间增长.
-
-    Y 轴 log scale 让小值方法和大值方法都看得见.
-    Transformer 曲线斜率应该最缓 (除 Static Peak 外).
-    """
+    """每 horizon 一个 panel: 测试集上累积未满足需求随时间增长."""
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)

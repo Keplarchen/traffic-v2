@@ -1,4 +1,4 @@
-"""在 test 集上评估 single-quantile (P95) Transformer + 4 个 baseline.
+"""在 test 集上评估 single-quantile (P95) PatchTST + 4 个 baseline.
 
 每个 horizon 单独计算指标. 输出:
     results.csv   per-horizon × per-method 数值表
@@ -21,21 +21,21 @@ from core.baselines import (
     naive_last_residual_p95, seasonal_naive_residual_p95,
 )
 from core.conformal import fit_correction, apply_correction
-from core.dataset import WindowDataset
+from core.patchtst_dataset import PatchTSTDataset
 from core.metrics import inverse_transform
-from models.transformer import TrafficTransformer
+from models.patchtst import PatchTST
 
 PT_PATH = ROOT / "data" / "processed" / "all.pt"
-CKPT_PATH = ROOT / "checkpoints" / "transformer_best.pt"
+CKPT_PATH = ROOT / "checkpoints" / "patchtst_best.pt"
 HERE = Path(__file__).resolve().parent
 
 DISPLAY = {
-    "static_peak":            "Static Peak",
-    "static_p95":             "Static P95",
-    "naive_last":             "Naive Last (resid)",
-    "seasonal_naive":         "Seasonal Naive (resid)",
-    "transformer":            "Transformer (P95)",
-    "transformer_conformal":  "Transformer + Conformal",
+    "static_peak":         "Static Peak",
+    "static_p95":          "Static P95",
+    "naive_last":          "Naive Last (resid)",
+    "seasonal_naive":      "Seasonal Naive (resid)",
+    "patchtst":            "PatchTST (P95)",
+    "patchtst_conformal":  "PatchTST + Conformal",
 }
 
 
@@ -56,26 +56,33 @@ def main():
     H = len(horizons)
     print(f"Loaded ckpt: epoch={ckpt['epoch']}, val_loss={ckpt['val_loss']:.4f}")
     print(f"Horizons: {horizons}  (1 step = 15 min)")
+    print(f"seq_len={cfg.seq_len}, patch_len={cfg.patch_len}, stride={cfg.stride}")
 
-    model = TrafficTransformer(cfg).to(device).eval()
+    model = PatchTST(cfg).to(device).eval()
     model.load_state_dict(ckpt["model_state_dict"])
 
-    # 3. Inference. 对 val 和 test 都跑一次:
+    # 3. Inference (bf16 autocast, 跟训练一致). 对 val 和 test 都跑一次:
     #    val 用于拟合 conformal 修正, test 用于评估.
     def run_inference(split):
-        ds = WindowDataset(PT_PATH, split, horizons=horizons)
-        loader = DataLoader(ds, batch_size=128, shuffle=False,
+        ds = PatchTSTDataset(PT_PATH, split,
+                             seq_len=cfg.seq_len, horizons=horizons)
+        loader = DataLoader(ds, batch_size=64, shuffle=False,
                             pin_memory=(device.type == "cuda"))
         pz, tz = [], []
         with torch.no_grad():
             for x, y in loader:
-                pz.append(model(x.to(device, non_blocking=True)).cpu())
+                x = x.to(device, non_blocking=True)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16,
+                                    enabled=(device.type == "cuda")):
+                    p = model(x)
+                pz.append(p.float().cpu())
                 tz.append(y)
         return torch.cat(pz), torch.cat(tz), ds
 
     pred_val_z, target_val_z, _ = run_inference("val")
     pred_z, target_z, test_ds = run_inference("test")
 
+    # 反变换到 real Mbps 空间
     pred_val_p95 = inverse_transform(pred_val_z[..., 0], mean, std).numpy()
     actual_val   = inverse_transform(target_val_z,    mean, std).numpy()
     pred_p95     = inverse_transform(pred_z[..., 0], mean, std).numpy()
@@ -98,12 +105,12 @@ def main():
     train_real = flows_real[:n_train_end]
     n_test = len(test_t)
     alloc = {
-        "static_peak":            static_peak(train_real, n_test, horizons),
-        "static_p95":             static_p95(train_real, n_test, horizons),
-        "naive_last":             naive_last_residual_p95(train_real, flows_real, test_t, horizons),
-        "seasonal_naive":         seasonal_naive_residual_p95(train_real, flows_real, test_t, horizons),
-        "transformer":            pred_p95,
-        "transformer_conformal":  pred_p95_conformal,
+        "static_peak":         static_peak(train_real, n_test, horizons),
+        "static_p95":          static_p95(train_real, n_test, horizons),
+        "naive_last":          naive_last_residual_p95(train_real, flows_real, test_t, horizons),
+        "seasonal_naive":      seasonal_naive_residual_p95(train_real, flows_real, test_t, horizons),
+        "patchtst":            pred_p95,
+        "patchtst_conformal":  pred_p95_conformal,
     }
 
     # 5. Per-horizon 指标 + 打印 + 收集 CSV 行

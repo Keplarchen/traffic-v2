@@ -22,17 +22,17 @@ from .patchtst_official.PatchTST_backbone import PatchTST_backbone
 
 @dataclass
 class PatchTSTConfig:
-    seq_len: int = 672          # 7 天历史 (15-min step)
+    seq_len: int = 96           # 24h 历史 (15-min step)
     n_channels: int = 462       # SD 对数
-    patch_len: int = 16
-    stride: int = 8
+    patch_len: int = 8          # 每 patch 覆盖 2h (8 × 15min)
+    stride: int = 4             # 半 overlap
     d_model: int = 128
     num_layers: int = 3         # 论文默认
     nhead: int = 4
     dim_feedforward: int = 256
     dropout: float = 0.2
-    n_quantiles: int = 3
-    horizons: tuple = (16,)     # 单 horizon: 4h ahead
+    n_quantiles: int = 1        # 只输出 P95 (alloc 本身)
+    horizons: tuple = (1,)      # 单 horizon: 15min ahead
 
     @property
     def n_horizons(self) -> int:
