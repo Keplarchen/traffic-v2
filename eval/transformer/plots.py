@@ -36,10 +36,9 @@ def _per_horizon_metric(d, h_idx, fn):
 
 
 def plot_horizon_metrics(d):
-    """X=horizon (min), Y=metric, 5 条线 (一个方法一条). 主结果图."""
+    """主结果图. 单 horizon → 柱状图 (5 个方法); 多 horizon → 折线图."""
     horizons = d["horizons"]
     H = len(horizons)
-    horizon_min = horizons * 15
 
     sla = {k: np.zeros(H) for k in ALLOC_KEYS}
     util = {k: np.zeros(H) for k in ALLOC_KEYS}
@@ -53,23 +52,53 @@ def plot_horizon_metrics(d):
             util[k][h_idx] = util_h[k]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
-    for k, c in zip(ALLOC_KEYS, _colors()):
-        ax1.plot(horizon_min, sla[k], "o-", color=c, label=DISPLAY[k], lw=2, ms=8)
-        ax2.plot(horizon_min, util[k], "o-", color=c, label=DISPLAY[k], lw=2, ms=8)
-    ax1.axhline(5, color="gray", ls=":", alpha=0.7, label="Target = 5%")
-    ax1.set(xlabel="Forecast horizon (min)", ylabel="SLA violation rate (%)",
-            title="SLA vs Horizon", xticks=horizon_min)
-    ax1.grid(alpha=0.3); ax1.legend(fontsize=8)
-    ax2.set(xlabel="Forecast horizon (min)", ylabel="Utilization (%)",
-            title="Utilization vs Horizon", xticks=horizon_min)
-    ax2.grid(alpha=0.3); ax2.legend(fontsize=8)
+
+    if H == 1:
+        h = int(horizons[0])
+        x_pos = np.arange(len(ALLOC_KEYS))
+        labels = [DISPLAY[k] for k in ALLOC_KEYS]
+        colors = list(_colors())
+        sla_vals = [sla[k][0] for k in ALLOC_KEYS]
+        util_vals = [util[k][0] for k in ALLOC_KEYS]
+
+        bars1 = ax1.bar(x_pos, sla_vals, color=colors)
+        ax1.axhline(5, color="gray", ls=":", alpha=0.7, label="Target = 5%")
+        ax1.set_xticks(x_pos); ax1.set_xticklabels(labels, rotation=20, ha="right", fontsize=8)
+        for b, v in zip(bars1, sla_vals):
+            ax1.text(b.get_x() + b.get_width()/2, v, f"{v:.2f}",
+                     ha="center", va="bottom", fontsize=8)
+        ax1.set(ylabel="SLA violation rate (%)",
+                title=f"SLA at h={h} ({h*15} min ahead)")
+        ax1.legend(fontsize=8); ax1.grid(alpha=0.3, axis="y")
+
+        bars2 = ax2.bar(x_pos, util_vals, color=colors)
+        ax2.set_xticks(x_pos); ax2.set_xticklabels(labels, rotation=20, ha="right", fontsize=8)
+        for b, v in zip(bars2, util_vals):
+            ax2.text(b.get_x() + b.get_width()/2, v, f"{v:.1f}",
+                     ha="center", va="bottom", fontsize=8)
+        ax2.set(ylabel="Utilization (%)",
+                title=f"Util at h={h} ({h*15} min ahead)")
+        ax2.grid(alpha=0.3, axis="y")
+    else:
+        horizon_min = horizons * 15
+        for k, c in zip(ALLOC_KEYS, _colors()):
+            ax1.plot(horizon_min, sla[k], "o-", color=c, label=DISPLAY[k], lw=2, ms=8)
+            ax2.plot(horizon_min, util[k], "o-", color=c, label=DISPLAY[k], lw=2, ms=8)
+        ax1.axhline(5, color="gray", ls=":", alpha=0.7, label="Target = 5%")
+        ax1.set(xlabel="Forecast horizon (min)", ylabel="SLA violation rate (%)",
+                title="SLA vs Horizon", xticks=horizon_min)
+        ax1.grid(alpha=0.3); ax1.legend(fontsize=8)
+        ax2.set(xlabel="Forecast horizon (min)", ylabel="Utilization (%)",
+                title="Utilization vs Horizon", xticks=horizon_min)
+        ax2.grid(alpha=0.3); ax2.legend(fontsize=8)
+
     fig.tight_layout()
     fig.savefig(FIG_DIR / "horizon_metrics.png", dpi=130)
     plt.close(fig)
 
 
 def plot_pareto_per_horizon(d):
-    """3 panel pareto, 每个 horizon 一个 panel."""
+    """每 horizon 一个 panel: SLA vs Util 散点."""
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(5*H, 5), sharey=True)
@@ -94,134 +123,108 @@ def plot_pareto_per_horizon(d):
     plt.close(fig)
 
 
-def plot_reliability(d):
-    """3 panel, P50/P90/P95 校准 vs 对角线."""
+def plot_violation_severity_cdf(d):
+    """每 horizon 一个 panel: 违约严重度 CDF (log x). 突出 ViolSize 优势.
+
+    每个方法收集所有 (actual - alloc) > 0 的违约量, 画 CDF.
+    Transformer 的曲线越早爬到 1.0, 说明严重违约越少.
+    """
     horizons = d["horizons"]
     H = len(horizons)
-    taus = np.array([0.5, 0.9, 0.95])
-    fig, axes = plt.subplots(1, H, figsize=(5*H, 5), sharey=True)
-    if H == 1:
-        axes = [axes]
-    for h_idx, h in enumerate(horizons):
-        ax = axes[h_idx]
-        actual_h = d["actual"][:, :, h_idx]
-        cov = np.array([
-            (d[f"pred_p{int(t*100)}"][:, :, h_idx] >= actual_h).mean() for t in taus
-        ])
-        ax.plot([0, 1], [0, 1], "k--", alpha=0.5)
-        ax.scatter(taus, cov, s=140, c="C0", zorder=3)
-        for t, c in zip(taus, cov):
-            ax.annotate(f"{c:.3f}", (t, c),
-                        textcoords="offset points", xytext=(8, -8), fontsize=9)
-        ax.set(xlim=(0, 1), ylim=(0, 1),
-               xlabel="Predicted quantile τ", title=f"h={h} ({h*15} min)")
-        ax.grid(alpha=0.3)
-    axes[0].set_ylabel("Empirical coverage")
-    fig.suptitle("Reliability diagram per horizon (Transformer)", y=1.0)
-    fig.tight_layout()
-    fig.savefig(FIG_DIR / "reliability.png", dpi=130)
-    plt.close(fig)
-
-
-def plot_per_sd_hist(d):
-    """3 panel, per SD-pair 违约率分布."""
-    horizons = d["horizons"]
-    H = len(horizons)
-    bins = np.linspace(0, 0.5, 41)
-    fig, axes = plt.subplots(1, H, figsize=(6*H, 4.5), sharey=True)
+    fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
     if H == 1:
         axes = [axes]
     for h_idx, h in enumerate(horizons):
         ax = axes[h_idx]
         actual_h = d["actual"][:, :, h_idx]
         for k, c in zip(ALLOC_KEYS, _colors()):
-            per_sd = (d[f"alloc_{k}"][:, :, h_idx] < actual_h).mean(axis=0)
-            ax.hist(per_sd, bins=bins, alpha=0.4, label=DISPLAY[k], color=c)
-        ax.axvline(0.05, color="gray", ls=":", alpha=0.7)
-        ax.set(xlabel="Per-SD-pair SLA violation rate", title=f"h={h} ({h*15} min)")
-        ax.grid(alpha=0.3)
-    axes[0].set_ylabel("Number of SD pairs")
-    axes[0].legend(fontsize=7)
-    fig.suptitle("Per-SD-pair SLA distribution per horizon", y=1.0)
+            alloc_h = d[f"alloc_{k}"][:, :, h_idx]
+            diff = actual_h - alloc_h
+            viols = diff[diff > 0]
+            if len(viols) == 0:
+                continue
+            sorted_viols = np.sort(viols)
+            cdf = np.arange(1, len(sorted_viols) + 1) / len(sorted_viols)
+            ax.plot(sorted_viols, cdf, color=c, lw=2,
+                    label=f"{DISPLAY[k]} (n={len(viols):,})")
+        ax.set_xscale("log")
+        ax.set_xlim(left=0.1)
+        ax.set_ylim(0, 1.02)
+        ax.set(xlabel="Violation size (Mbps, log scale)",
+               title=f"h={h} ({h*15} min)")
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=7, loc="lower right")
+    axes[0].set_ylabel(r"CDF: $P(\text{violation size} \leq x)$")
+    fig.suptitle("Violation severity CDF per horizon "
+                 "(curves rising left = smaller violations)", y=1.0)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "per_sd_sla_hist.png", dpi=130)
+    fig.savefig(FIG_DIR / "violation_severity_cdf.png", dpi=130)
     plt.close(fig)
 
 
-def plot_sd_timeseries(d):
-    """3 SD pair × 3 horizon = 9 panel, 时序 actual + P50-P95 band + violations."""
+def plot_per_sd_sla_sorted(d):
+    """每 horizon 一个 panel: 462 个 pair 按 per-pair SLA 降序画曲线.
+
+    一图同时展示 %Pair>5% (5% 横线之上面积) 和 WorstPair% (最左点).
+    Transformer 的曲线在右侧应该最低 = 长尾控制最好.
+    """
     horizons = d["horizons"]
     H = len(horizons)
-    sd_names = np.load(ROOT / "data" / "sd_pair_names.npy")
-    means = d["actual"][:, :, 0].mean(axis=0)
-    nz = np.where(means > 1)[0]
-    sorted_nz = nz[np.argsort(means[nz])]
-    selected = [sorted_nz[-1], sorted_nz[len(sorted_nz)//2], sorted_nz[0]]
-
-    fig, axes = plt.subplots(len(selected), H,
-                             figsize=(5*H, 2.8*len(selected)), sharex=True)
-    x = np.arange(d["actual"].shape[0])
-    for r, sd in enumerate(selected):
-        for h_idx in range(H):
-            ax = axes[r, h_idx]
-            actual_sd = d["actual"][:, sd, h_idx]
-            p50_sd = d["pred_p50"][:, sd, h_idx]
-            p95_sd = d["pred_p95"][:, sd, h_idx]
-            ax.fill_between(x, p50_sd, p95_sd, alpha=0.25, color="C0")
-            ax.plot(x, actual_sd, color="black", lw=0.8, alpha=0.7)
-            ax.plot(x, p95_sd, color="C0", lw=0.9)
-            viol = p95_sd < actual_sd
-            if viol.any():
-                ax.scatter(x[viol], actual_sd[viol], s=8, color="red", zorder=5)
-            if h_idx == 0:
-                ax.set_ylabel(f"{sd_names[sd]}\n(mean {means[sd]:.0f} Mbps)",
-                              fontsize=8)
-            if r == 0:
-                ax.set_title(f"h={horizons[h_idx]} ({horizons[h_idx]*15} min)",
-                             fontsize=10)
-            ax.grid(alpha=0.2); ax.tick_params(labelsize=7)
-    for ax in axes[-1]:
-        ax.set_xlabel("Test step", fontsize=8)
-    fig.suptitle("Per (SD pair, horizon): actual / P50-P95 band / violations",
-                 y=0.999, fontsize=10)
-    fig.tight_layout()
-    fig.savefig(FIG_DIR / "sd_pair_timeseries.png", dpi=130)
-    plt.close(fig)
-
-
-def plot_daily_cycle(d):
-    """3 panel daily cycle. 横轴 hour-of-target, 纵轴 mean Mbps."""
-    horizons = d["horizons"]
-    H = len(horizons)
-    timestamps = np.load(ROOT / "data" / "timestamps.npy")
-    hour = ((timestamps.astype(np.int64) % (24*60)) // 60).astype(int)
-
-    fig, axes = plt.subplots(1, H, figsize=(5*H, 4.5), sharey=True)
+    fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
     if H == 1:
         axes = [axes]
     for h_idx, h in enumerate(horizons):
         ax = axes[h_idx]
-        target_hour = hour[d["test_t"] + h]
-        a_h = np.zeros(24); p50_h = np.zeros(24); p95_h = np.zeros(24)
-        for hr in range(24):
-            mask = target_hour == hr
-            if mask.any():
-                a_h[hr] = d["actual"][mask, :, h_idx].mean()
-                p50_h[hr] = d["pred_p50"][mask, :, h_idx].mean()
-                p95_h[hr] = d["pred_p95"][mask, :, h_idx].mean()
-        hh = np.arange(24)
-        ax.fill_between(hh, p50_h, p95_h, alpha=0.25, color="C0", label="P50–P95")
-        ax.plot(hh, a_h, "k-", lw=1.5, label="Actual")
-        ax.plot(hh, p50_h, color="C1", lw=1.2, label="P50")
-        ax.plot(hh, p95_h, color="C0", lw=1.2, label="P95")
-        ax.set(xticks=np.arange(0, 24, 6), xlabel="Hour of target (UTC)",
+        actual_h = d["actual"][:, :, h_idx]
+        for k, c in zip(ALLOC_KEYS, _colors()):
+            alloc_h = d[f"alloc_{k}"][:, :, h_idx]
+            per_pair_sla = 100 * (alloc_h < actual_h).mean(axis=0)
+            sorted_sla = np.sort(per_pair_sla)[::-1]   # 降序
+            x = np.arange(1, len(sorted_sla) + 1)
+            ax.plot(x, sorted_sla, color=c, lw=1.8, label=DISPLAY[k])
+        ax.axhline(5, color="gray", ls=":", alpha=0.7, label="Target = 5%")
+        ax.set(xlabel="SD pair rank (sorted by per-pair SLA, desc)",
                title=f"h={h} ({h*15} min)")
         ax.grid(alpha=0.3)
-    axes[0].set_ylabel("Mean Mbps over 462 SD pairs")
-    axes[0].legend(fontsize=8)
-    fig.suptitle("Daily cycle per horizon", y=1.0)
+        ax.legend(fontsize=7)
+    axes[0].set_ylabel("Per-pair SLA violation rate (%)")
+    fig.suptitle("Per-pair SLA sorted curve "
+                 "(lower-right = better long-tail control)", y=1.0)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "daily_cycle.png", dpi=130)
+    fig.savefig(FIG_DIR / "per_sd_sla_sorted.png", dpi=130)
+    plt.close(fig)
+
+
+def plot_cumulative_unmet(d):
+    """每 horizon 一个 panel: 测试集上累积未满足需求随时间增长.
+
+    Y 轴 log scale 让小值方法和大值方法都看得见.
+    Transformer 曲线斜率应该最缓 (除 Static Peak 外).
+    """
+    horizons = d["horizons"]
+    H = len(horizons)
+    fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
+    if H == 1:
+        axes = [axes]
+    for h_idx, h in enumerate(horizons):
+        ax = axes[h_idx]
+        actual_h = d["actual"][:, :, h_idx]
+        for k, c in zip(ALLOC_KEYS, _colors()):
+            alloc_h = d[f"alloc_{k}"][:, :, h_idx]
+            unmet_per_step = np.maximum(actual_h - alloc_h, 0).sum(axis=1)   # [N]
+            cumsum = np.cumsum(unmet_per_step)
+            total = cumsum[-1]
+            ax.plot(np.arange(len(cumsum)), cumsum, color=c, lw=1.8,
+                    label=f"{DISPLAY[k]} (total={total:,.0f})")
+        ax.set_yscale("log")
+        ax.set(xlabel="Test step", title=f"h={h} ({h*15} min)")
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=7, loc="lower right")
+    axes[0].set_ylabel("Cumulative unmet demand (Mbps, log scale)")
+    fig.suptitle("Cumulative unmet demand over test set "
+                 "(flatter slope = less total bandwidth lost)", y=1.0)
+    fig.tight_layout()
+    fig.savefig(FIG_DIR / "cumulative_unmet.png", dpi=130)
     plt.close(fig)
 
 
@@ -231,8 +234,7 @@ if __name__ == "__main__":
     d = np.load(NPZ_PATH)
     plot_horizon_metrics(d)
     plot_pareto_per_horizon(d)
-    plot_reliability(d)
-    plot_per_sd_hist(d)
-    plot_sd_timeseries(d)
-    plot_daily_cycle(d)
+    plot_violation_severity_cdf(d)
+    plot_per_sd_sla_sorted(d)
+    plot_cumulative_unmet(d)
     print(f"All figures saved to {FIG_DIR}")

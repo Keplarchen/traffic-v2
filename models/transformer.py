@@ -1,7 +1,7 @@
-"""TrafficTransformer: 多分辨率上下文 + 多 horizon + 多分位数 (MIMO) 流量预测.
+"""TrafficTransformer: 24h 连续上下文 + 多 horizon, 单 P95 分位数输出.
 
-输入  [B, 107, 466]      96 recent + 7 daily + 4 weekly token; 462 流量 + 4 时间特征
-输出  [B, 462, H, Q]     z-score 空间下, H 个 horizon 各 Q 个分位数 (P50, P90, P95)
+输入  [B, 96, 466]       96 步连续 (= 24h, 每 15min); 462 流量 + 4 时间特征
+输出  [B, 462, H, 1]     z-score 空间下 H 个 horizon 的 P95 alloc (直接当带宽分配)
 """
 
 import math
@@ -13,9 +13,7 @@ import torch.nn as nn
 
 @dataclass
 class TransformerConfig:
-    seq_len_recent: int = 96
-    seq_len_daily: int = 7
-    seq_len_weekly: int = 4
+    seq_len: int = 96            # 过去 24 小时, 15-min step
     n_sd_pairs: int = 462
     n_time_feats: int = 4
     d_model: int = 64
@@ -23,13 +21,9 @@ class TransformerConfig:
     nhead: int = 4
     dim_feedforward: int = 128
     dropout: float = 0.2
-    n_quantiles: int = 3
+    n_quantiles: int = 1            # 只输出 P95 (alloc 本身)
     # 预测的未来步数, 单位 = 15 min. 默认 1=15min, 4=1h, 16=4h, 96=24h
-    horizons: tuple = (16,)
-
-    @property
-    def seq_len(self) -> int:
-        return self.seq_len_recent + self.seq_len_daily + self.seq_len_weekly
+    horizons: tuple = (1,)
 
     @property
     def input_dim(self) -> int:
@@ -64,21 +58,11 @@ class TrafficTransformer(nn.Module):
         # 1. 把 466 维输入映射到 d_model
         self.input_proj = nn.Linear(cfg.input_dim, cfg.d_model)
 
-        # 2. Token 类型嵌入: 0=recent, 1=daily anchor, 2=weekly anchor
-        #    告诉模型每个 token 来自哪种时间分辨率
-        self.type_embedding = nn.Embedding(3, cfg.d_model)
-        type_ids = torch.cat([
-            torch.zeros(cfg.seq_len_recent, dtype=torch.long),
-            torch.ones(cfg.seq_len_daily, dtype=torch.long),
-            torch.full((cfg.seq_len_weekly,), 2, dtype=torch.long),
-        ])
-        self.register_buffer("type_ids", type_ids)
-
-        # 3. 位置编码 + Dropout
+        # 2. 位置编码 + Dropout
         self.pos_encoding = PositionalEncoding(cfg.d_model, max_len=cfg.seq_len)
         self.input_dropout = nn.Dropout(cfg.dropout)
 
-        # 4. Transformer 编码器: pre-norm, 训练更稳定; 末尾再加一层 LayerNorm
+        # 3. Transformer 编码器: pre-norm, 训练更稳定; 末尾再加一层 LayerNorm
         layer = nn.TransformerEncoderLayer(
             d_model=cfg.d_model, nhead=cfg.nhead,
             dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout,
@@ -88,10 +72,10 @@ class TrafficTransformer(nn.Module):
             layer, cfg.num_layers, norm=nn.LayerNorm(cfg.d_model),
         )
 
-        # 5. 取"当下"那个 token 做预测: 最后一个 recent token
-        self.current_idx = cfg.seq_len_recent - 1
+        # 4. 取"当下"那个 token 做预测: 窗口最后一个 token
+        self.current_idx = cfg.seq_len - 1
 
-        # 6. 单层 Linear 解码到 462 SD * H horizon * Q 分位数
+        # 5. 单层 Linear 解码到 462 SD * H horizon * Q 分位数
         self.decoder = nn.Linear(
             cfg.d_model,
             cfg.n_sd_pairs * cfg.n_horizons * cfg.n_quantiles,
@@ -100,7 +84,6 @@ class TrafficTransformer(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B = x.size(0)
         h = self.input_proj(x)
-        h = h + self.type_embedding(self.type_ids).unsqueeze(0)
         h = self.input_dropout(self.pos_encoding(h))
         h = self.encoder(h)
         delta = self.decoder(h[:, self.current_idx, :])     # [B, P*H*Q]

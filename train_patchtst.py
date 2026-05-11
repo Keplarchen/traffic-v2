@@ -37,7 +37,9 @@ def evaluate(model, loader, mean, std, device):
     for x, y in loader:
         x = x.to(device, non_blocking=True)
         y = y.to(device, non_blocking=True)
-        preds.append(model(x).cpu())
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            p = model(x)
+        preds.append(p.float().cpu())
         targets.append(y.cpu())
     pred_z = torch.cat(preds)
     target_z = torch.cat(targets)
@@ -114,8 +116,9 @@ def main():
                 g["lr"] = lr
 
             optimizer.zero_grad()
-            pred = model(x)
-            loss = pinball_loss(pred, y)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                pred = model(x)
+                loss = pinball_loss(pred, y)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()

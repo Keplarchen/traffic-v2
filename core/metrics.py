@@ -50,6 +50,49 @@ def compute_metrics(
     }
 
 
+def compute_alloc_metrics(
+    alloc_z: torch.Tensor,
+    target_z: torch.Tensor,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+) -> dict:
+    """单分位场景: 模型输出直接当 alloc, 无 P50/P90, 不算 MAE_P50.
+
+    alloc_z, target_z: same shape, 都是 z-score 空间.
+
+    返回的指标:
+      sla_violation_rate       违约频率 (target = 0.05)
+      utilization              带宽利用率 = sum(actual)/sum(alloc)
+      avg_wasted_mbps          平均浪费 (over-provisioning) per cell
+      avg_actual_mbps          actual 平均
+      avg_alloc_mbps           alloc 平均
+      avg_violation_size_mbps  违约时平均超出多少 Mbps (only over violations)
+      total_unmet_mbps         测试集累积未满足需求总量 (sum of violations)
+    """
+    alloc = inverse_transform(alloc_z, mean, std)
+    actual = inverse_transform(target_z, mean, std)
+
+    sum_actual = actual.sum().item()
+    sum_alloc = alloc.sum().item()
+    diff = actual - alloc                       # > 0 时为违约量
+    violations = diff > 0
+    n_viols = int(violations.sum().item())
+
+    avg_violation_size = (
+        diff[violations].mean().item() if n_viols > 0 else 0.0
+    )
+
+    return {
+        "sla_violation_rate": violations.float().mean().item(),
+        "utilization": sum_actual / max(sum_alloc, 1e-6),
+        "avg_wasted_mbps": (alloc - actual).clamp(min=0).mean().item(),
+        "avg_actual_mbps": actual.mean().item(),
+        "avg_alloc_mbps": alloc.mean().item(),
+        "avg_violation_size_mbps": avg_violation_size,
+        "total_unmet_mbps": diff.clamp(min=0).sum().item(),
+    }
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     N, P = 100, 462

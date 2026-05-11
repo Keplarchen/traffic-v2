@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core.dataset import WindowDataset
 from core.losses import pinball_loss
-from core.metrics import compute_metrics
+from core.metrics import compute_alloc_metrics
 from models.transformer import TrafficTransformer, TransformerConfig
 
 
@@ -39,10 +39,10 @@ def evaluate(model, loader, mean, std, device):
         y = y.to(device, non_blocking=True)
         preds.append(model(x).cpu())
         targets.append(y.cpu())
-    pred_z = torch.cat(preds)
-    target_z = torch.cat(targets)
-    val_loss = pinball_loss(pred_z, target_z).item()
-    metrics = compute_metrics(pred_z, target_z, mean, std, q_idx=2)
+    pred_z = torch.cat(preds)             # [N, P, H, 1]
+    target_z = torch.cat(targets)         # [N, P, H]
+    val_loss = pinball_loss(pred_z, target_z, taus=(0.95,)).item()
+    metrics = compute_alloc_metrics(pred_z[..., 0], target_z, mean, std)
     return val_loss, metrics
 
 
@@ -113,7 +113,7 @@ def main():
 
             optimizer.zero_grad()
             pred = model(x)
-            loss = pinball_loss(pred, y)
+            loss = pinball_loss(pred, y, taus=(0.95,))
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
@@ -127,7 +127,7 @@ def main():
 
         print(f"E{epoch:3d}/{args.epochs} | train {train_loss:.4f} | val {val_loss:.4f} "
               f"| sla {vm['sla_violation_rate']:.4f} | util {vm['utilization']:.3f} "
-              f"| mae {vm['mae_p50']:.1f} Mbps | lr {lr:.2e} | {dt:.1f}s")
+              f"| alloc {vm['avg_alloc_mbps']:.1f} Mbps | lr {lr:.2e} | {dt:.1f}s")
 
         if val_loss < best_val:
             best_val = val_loss

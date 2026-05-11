@@ -1,8 +1,8 @@
-"""在 test 集上评估 multi-horizon Transformer + 4 个 baseline.
+"""在 test 集上评估 single-quantile (P95) Transformer + 4 个 baseline.
 
 每个 horizon 单独计算指标. 输出:
     results.csv   per-horizon × per-method 数值表
-    preds.npz     中间结果 (含 horizons 数组, 各方法 alloc, P50/P90/P95 等)
+    preds.npz     中间结果 (含 horizons 数组, 各方法 alloc, actual, test_t)
     控制台          per-horizon 对比表
 """
 
@@ -70,9 +70,7 @@ def main():
     pred_z = torch.cat(pz)             # [N, P, H, Q]
     target_z = torch.cat(tz)           # [N, P, H]
 
-    pred_p50 = inverse_transform(pred_z[..., 0], mean, std).numpy()    # [N, P, H]
-    pred_p90 = inverse_transform(pred_z[..., 1], mean, std).numpy()
-    pred_p95 = inverse_transform(pred_z[..., 2], mean, std).numpy()
+    pred_p95 = inverse_transform(pred_z[..., 0], mean, std).numpy()    # [N, P, H]
     actual   = inverse_transform(target_z,    mean, std).numpy()
     test_t = test_ds.t_starts.numpy()
 
@@ -89,46 +87,70 @@ def main():
 
     # 5. Per-horizon 指标 + 打印 + 收集 CSV 行
     rows = []
+    target_sla = 0.05
     for h_idx, h in enumerate(horizons):
         print(f"\n=== Horizon h={h}  ({h * 15} min ahead) ===")
-        print(f"{'Method':<25} {'SLA %':>7} {'Util %':>7} {'AvgAlloc':>10} {'OverProv':>10}")
-        print("-" * 62)
+        print(f"{'Method':<25} {'SLA%':>6} {'Util%':>6} {'AvgAlloc':>9} "
+              f"{'OverProv':>9} {'%Pair>5%':>9} {'WorstPair%':>11} "
+              f"{'ViolSize':>9} {'TotUnmet':>10}")
+        print("-" * 105)
         actual_h = actual[:, :, h_idx]
         for k, a_full in alloc.items():
             a = a_full[:, :, h_idx]
+
+            # 聚合指标
             sla = 100 * (a < actual_h).mean()
             util = 100 * actual_h.sum() / max(a.sum(), 1e-9)
-            m = {
-                "sla_pct": sla,
-                "util_pct": util,
-                "avg_alloc": a.mean(),
-                "avg_overprov": np.maximum(a - actual_h, 0).mean(),
-            }
-            print(f"{DISPLAY[k]:<25} {m['sla_pct']:>7.2f} {m['util_pct']:>7.2f} "
-                  f"{m['avg_alloc']:>10.1f} {m['avg_overprov']:>10.1f}")
-            rows.append([h, DISPLAY[k], m['sla_pct'], m['util_pct'],
-                         m['avg_alloc'], m['avg_overprov']])
-        mae = float(np.abs(pred_p50[:, :, h_idx] - actual_h).mean())
-        print(f"  Transformer MAE_P50 = {mae:.2f} Mbps    "
-              f"actual mean = {actual_h.mean():.2f}")
+            avg_alloc = a.mean()
+            avg_overprov = np.maximum(a - actual_h, 0).mean()
+
+            # Per-pair SLA 分布: 每对在时间维上的违约率
+            per_pair_sla = (a < actual_h).mean(axis=0)             # [P]
+            pct_pairs_above_target = 100 * (per_pair_sla > target_sla).mean()
+            worst_pair_sla = 100 * per_pair_sla.max()
+
+            # 违约严重度
+            diff = actual_h - a                                     # > 0 时为违约
+            viol_mask = diff > 0
+            avg_viol_size = float(diff[viol_mask].mean()) if viol_mask.any() else 0.0
+            total_unmet = float(np.maximum(diff, 0).sum())          # Mbps total
+
+            print(f"{DISPLAY[k]:<25} {sla:>6.2f} {util:>6.2f} "
+                  f"{avg_alloc:>9.1f} {avg_overprov:>9.1f} "
+                  f"{pct_pairs_above_target:>9.1f} {worst_pair_sla:>11.1f} "
+                  f"{avg_viol_size:>9.1f} {total_unmet:>10.0f}")
+
+            rows.append([h, DISPLAY[k], sla, util, avg_alloc, avg_overprov,
+                         pct_pairs_above_target, worst_pair_sla,
+                         avg_viol_size, total_unmet])
+        print(f"  actual mean = {actual_h.mean():.2f} Mbps    "
+              f"n_test_steps = {actual_h.shape[0]}    n_pairs = {actual_h.shape[1]}")
 
     # 6. CSV
     csv_path = HERE / "results.csv"
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Horizon_steps", "Horizon_min", "Method",
-                    "SLA_pct", "Util_pct", "Avg_alloc_Mbps", "Avg_overprov_Mbps"])
+        w.writerow([
+            "Horizon_steps", "Horizon_min", "Method",
+            "SLA_pct", "Util_pct", "Avg_alloc_Mbps", "Avg_overprov_Mbps",
+            "Pct_pairs_SLA_above_5pct", "Worst_pair_SLA_pct",
+            "Avg_violation_size_Mbps", "Total_unmet_Mbps",
+        ])
         for row in rows:
-            w.writerow([row[0], row[0]*15, row[1],
-                        f"{row[2]:.2f}", f"{row[3]:.2f}",
-                        f"{row[4]:.2f}", f"{row[5]:.2f}"])
+            w.writerow([
+                row[0], row[0]*15, row[1],
+                f"{row[2]:.2f}", f"{row[3]:.2f}",
+                f"{row[4]:.2f}", f"{row[5]:.2f}",
+                f"{row[6]:.2f}", f"{row[7]:.2f}",
+                f"{row[8]:.2f}", f"{row[9]:.2f}",
+            ])
     print(f"\nSaved {csv_path}")
 
     # 7. 中间结果给 plots.py
     npz_path = HERE / "preds.npz"
     np.savez(
         npz_path,
-        actual=actual, pred_p50=pred_p50, pred_p90=pred_p90, pred_p95=pred_p95,
+        actual=actual,
         test_t=test_t,
         horizons=np.array(horizons),
         **{f"alloc_{k}": v for k, v in alloc.items()},
