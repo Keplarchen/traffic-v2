@@ -1,10 +1,10 @@
-"""PatchTSTDataset: 纯连续 seq_len 步窗口, channel-independent 友好.
+"""PatchTSTDataset: pure continuous seq_len window for channel-independent input.
 
-跟 dataset.py 里的 multi-resolution WindowDataset 不同:
-  x  [seq_len, 462]    连续 seq_len 步流量, 不混合时间特征
-  y  [462, H]          H 个 horizon 各通道的目标
+Differs from WindowDataset (multi-resolution tokens) in dataset.py:
+  x  [seq_len, 462]    continuous seq_len-step traffic, no time features
+  y  [462, H]          target traffic per pair per horizon
 
-PatchTST 自带 RevIN 处理归一化, 不需要外部时间特征.
+PatchTST uses RevIN internally for normalization, so no extra time features are needed.
 """
 
 from pathlib import Path
@@ -25,15 +25,15 @@ class PatchTSTDataset(Dataset):
         if split not in ("train", "val", "test"):
             raise ValueError(f"unknown split: {split}")
         start, end = d[f"{split}_idx"]
-        # t = 输入窗口最后一个时刻 (即"现在")
-        # 约束:
-        #   - 输入窗口完整: t - seq_len + 1 >= 0  → t >= seq_len - 1
-        #   - target 落在 split 内: t + max_h < end  → t <= end - 1 - max_h
-        #   - target 不能更早于 split 起点: start <= t + min_h  → t >= start - 1
+        # t = last timestep in the input window ("now")
+        # Constraints:
+        #   - input window fits: t - seq_len + 1 >= 0  -> t >= seq_len - 1
+        #   - target stays in split: t + max_h < end   -> t <= end - 1 - max_h
+        #   - target not earlier than split start: start <= t + min_h -> t >= start - 1
         t_lo = max(start - 1, seq_len - 1)
         t_hi = end - 1 - max_h
         if t_lo > t_hi:
-            raise ValueError(f"split {split} 太短, 无有效样本 "
+            raise ValueError(f"split {split} too short, no valid samples "
                              f"(t_lo={t_lo}, t_hi={t_hi})")
         self.t_starts = torch.arange(t_lo, t_hi + 1)
 
@@ -43,7 +43,7 @@ class PatchTSTDataset(Dataset):
     def __getitem__(self, i):
         t = int(self.t_starts[i])
         x = self.flows_z[t - self.seq_len + 1 : t + 1]   # [seq_len, n_channels]
-        # y: 取 H 个未来时刻, transpose 成 [n_channels, H] 跟模型输出对齐
+        # y: H future steps, transposed to [n_channels, H] to align with model output
         y = self.flows_z[t + self.horizons].transpose(0, 1).contiguous()
         return x, y
 

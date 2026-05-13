@@ -1,7 +1,7 @@
-"""读 results.csv, 渲染成表格图.
+"""Render results.csv as a table image.
 
-用法: python eval/transformer/results_table.py
-输出: figures/results_table.png
+Usage: python eval/transformer/results_table.py
+Output: figures/results_table.png
 """
 
 import csv
@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent
 CSV_PATH = HERE / "results.csv"
 OUT_PATH = HERE / "figures" / "results_table.png"
 
-# CSV 列名 -> 显示用短名字
+# Map CSV column names to compact display names
 HEADER_MAP = {
     "Horizon_steps":            "h_step",
     "Horizon_min":              "h_min",
@@ -31,7 +31,7 @@ HEADER_MAP = {
 
 def main():
     if not CSV_PATH.exists():
-        raise FileNotFoundError(f"未找到 {CSV_PATH}, 请先跑 run_eval.py")
+        raise FileNotFoundError(f"Missing {CSV_PATH}; please run run_eval.py first")
 
     with open(CSV_PATH) as f:
         reader = csv.reader(f)
@@ -52,16 +52,16 @@ def main():
     table.set_fontsize(10)
     table.scale(1, 1.7)
 
-    # 表头加粗 + 浅灰背景
+    # Bold header with a light gray background
     for j in range(len(display_header)):
         cell = table[0, j]
         cell.set_text_props(weight="bold")
         cell.set_facecolor("#e8e8e8")
 
-    # Method 列左对齐, 给宽一点
+    # Left-align and widen the Method column
     n_rows = len(rows)
     method_col_idx = header.index("Method")
-    for i in range(n_rows + 1):   # +1 for header row
+    for i in range(n_rows + 1):
         cell = table[i, method_col_idx]
         cell.set_width(0.18)
         if i > 0:

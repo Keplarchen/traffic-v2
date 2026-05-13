@@ -1,10 +1,10 @@
-"""WindowDataset: 把 all.pt 里的连续序列切成 (x, y) 训练样本.
+"""WindowDataset: builds (x, y) training samples from the all.pt continuous series.
 
-每条样本:
-  x  [seq_len, 466]  过去 seq_len 步连续窗口; 462 流量 + 4 时间特征
-  y  [462, H]        462 个 SD 对各 H 个 horizon 的目标流量 (z-score 空间)
-                     默认 horizons=(1, 4, 16) → 15min, 1h, 4h
-                     维度顺序 (P, H) 跟模型输出 (P, H, Q) 对齐, 损失计算更清晰
+Each sample:
+  x  [seq_len, 466]  continuous past window; 462 flows + 4 time features
+  y  [462, H]        target flow per SD pair for each of H horizons (z-score space)
+                     Default horizons=(1, 4, 16) -> 15min, 1h, 4h
+                     Dimension order (P, H) aligns with model output (P, H, Q).
 """
 
 from pathlib import Path
@@ -14,11 +14,11 @@ from torch.utils.data import Dataset
 
 
 class WindowDataset(Dataset):
-    SEQ_LEN = 96   # 过去 24 小时, 每 15 min 一个 token
+    SEQ_LEN = 96   # past 24 hours, one token per 15 minutes
 
     @classmethod
     def min_t(cls) -> int:
-        # 最早可预测的 t: 需要 SEQ_LEN 步历史, 即 t - SEQ_LEN + 1 >= 0
+        # Earliest valid t requires SEQ_LEN history, i.e. t - SEQ_LEN + 1 >= 0
         return cls.SEQ_LEN - 1
 
     def __init__(self, all_pt_path, split: str, horizons=(1, 4, 16)):
@@ -31,15 +31,15 @@ class WindowDataset(Dataset):
         if split not in ("train", "val", "test"):
             raise ValueError(f"unknown split: {split}")
         start, end = d[f"{split}_idx"]
-        # target y[h] = flows_z[t+h]; 所有 h 必须落在 split 内
-        # → t ∈ [start-1, end-1-max_h], 同时全局 t >= min_t
+        # Target y[h] = flows_z[t+h]; every h must fall within the split.
+        # => t in [start-1, end-1-max_h], and globally t >= min_t.
         t_lo = max(start - 1, self.min_t())
         t_hi = end - 1 - max_h
         if t_lo > t_hi:
-            raise ValueError(f"split {split} 太短, 无有效样本")
+            raise ValueError(f"split {split} too short, no valid samples")
         self.t_starts = torch.arange(t_lo, t_hi + 1)
 
-        # 连续窗口: t-SEQ_LEN+1 .. t (含 t)
+        # Continuous window: t-SEQ_LEN+1 .. t (inclusive)
         self.rel_offsets = torch.arange(-self.SEQ_LEN + 1, 1)   # [SEQ_LEN]
 
     def __len__(self):
@@ -51,7 +51,7 @@ class WindowDataset(Dataset):
         flows = self.flows_z[idx]                    # [SEQ_LEN, 462]
         times = self.time_feats[idx]                 # [SEQ_LEN, 4]
         x = torch.cat([flows, times], dim=-1)        # [SEQ_LEN, 466]
-        # 取 H 个未来时刻, 然后把维度从 (H, P) 转成 (P, H) 跟模型输出对齐
+        # Take H future steps and transpose to (P, H) to align with model output
         y = self.flows_z[t + self.horizons].transpose(0, 1).contiguous()  # [462, H]
         return x, y
 

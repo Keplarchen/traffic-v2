@@ -1,6 +1,7 @@
-"""5 张评估图. 读 preds.npz, 输出到 figures/.
+"""Evaluation figures. Reads preds.npz and writes PNG files into figures/.
 
-每个 plot_xxx 独立可调用. 直接 python plots.py 跑全部.
+Each plot_xxx function is independently callable. Running this file as a script
+generates all figures.
 """
 
 import sys
@@ -31,13 +32,13 @@ def _colors():
 
 
 def _per_horizon_metric(d, h_idx, fn):
-    """对每个方法在 horizon h_idx 上算 fn(alloc, actual)."""
+    """Apply fn(alloc, actual) for each method at horizon index h_idx."""
     actual_h = d["actual"][:, :, h_idx]
     return {k: fn(d[f"alloc_{k}"][:, :, h_idx], actual_h) for k in ALLOC_KEYS}
 
 
 def plot_horizon_metrics(d):
-    """主结果图. 单 horizon → 柱状图 (5 个方法); 多 horizon → 折线图."""
+    """Main results figure. Single horizon -> bar chart; multi-horizon -> line plot."""
     horizons = d["horizons"]
     H = len(horizons)
 
@@ -99,7 +100,7 @@ def plot_horizon_metrics(d):
 
 
 def plot_pareto_per_horizon(d):
-    """每 horizon 一个 panel: SLA vs Util 散点."""
+    """One panel per horizon: SLA vs Util scatter."""
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(5*H, 5), sharey=True)
@@ -125,7 +126,11 @@ def plot_pareto_per_horizon(d):
 
 
 def plot_violation_severity_cdf(d):
-    """每 horizon 一个 panel: 违约严重度 CDF (log x). 突出 ViolSize 优势."""
+    """One panel per horizon: CDF of violation magnitudes (log x).
+
+    Each method collects all positive (actual - alloc) values and plots the CDF.
+    A curve that rises to 1 sooner indicates fewer large violations.
+    """
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
@@ -160,7 +165,11 @@ def plot_violation_severity_cdf(d):
 
 
 def plot_per_sd_sla_sorted(d):
-    """每 horizon 一个 panel: 462 个 pair 按 per-pair SLA 降序画曲线."""
+    """One panel per horizon: 462 pairs sorted by per-pair SLA, plotted descending.
+
+    Captures both %Pair>5% (area above the 5% line) and WorstPair% (leftmost point).
+    A curve that sits lower on the right has better long-tail control.
+    """
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
@@ -172,7 +181,7 @@ def plot_per_sd_sla_sorted(d):
         for k, c in zip(ALLOC_KEYS, _colors()):
             alloc_h = d[f"alloc_{k}"][:, :, h_idx]
             per_pair_sla = 100 * (alloc_h < actual_h).mean(axis=0)
-            sorted_sla = np.sort(per_pair_sla)[::-1]   # 降序
+            sorted_sla = np.sort(per_pair_sla)[::-1]   # descending
             x = np.arange(1, len(sorted_sla) + 1)
             ax.plot(x, sorted_sla, color=c, lw=1.8, label=DISPLAY[k])
         ax.axhline(5, color="gray", ls=":", alpha=0.7, label="Target = 5%")
@@ -189,7 +198,11 @@ def plot_per_sd_sla_sorted(d):
 
 
 def plot_cumulative_unmet(d):
-    """每 horizon 一个 panel: 测试集上累积未满足需求随时间增长."""
+    """One panel per horizon: cumulative unmet demand over the test set.
+
+    Log-scale y-axis lets methods with very different magnitudes coexist.
+    A flatter slope indicates less total bandwidth lost.
+    """
     horizons = d["horizons"]
     H = len(horizons)
     fig, axes = plt.subplots(1, H, figsize=(6*H, 5), sharey=True)
@@ -219,7 +232,7 @@ def plot_cumulative_unmet(d):
 
 if __name__ == "__main__":
     if not NPZ_PATH.exists():
-        sys.exit(f"未找到 {NPZ_PATH}, 请先跑 run_eval.py")
+        sys.exit(f"Missing {NPZ_PATH}; please run run_eval.py first")
     d = np.load(NPZ_PATH)
     plot_horizon_metrics(d)
     plot_pareto_per_horizon(d)

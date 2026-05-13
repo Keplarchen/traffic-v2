@@ -1,7 +1,0 @@
-Horizon_steps,Horizon_min,Method,SLA_pct,Util_pct,Avg_alloc_Mbps,Avg_overprov_Mbps,Pct_pairs_SLA_above_5pct,Worst_pair_SLA_pct,Avg_violation_size_Mbps,Total_unmet_Mbps
-1,15,Static Peak,0.01,3.80,2141.38,2060.09,0.00,1.13,55.30,2654.32
-1,15,Static P95,6.13,28.06,289.68,213.77,21.43,93.72,87.70,2848076.50
-1,15,Naive Last (resid),4.09,74.96,108.45,28.24,22.29,36.74,26.47,573353.00
-1,15,Seasonal Naive (resid),3.46,35.49,229.08,150.15,19.48,51.31,68.21,1247810.50
-1,15,PatchTST (P95),5.48,81.13,100.20,19.75,74.89,12.22,15.35,445001.34
-1,15,PatchTST + Conformal,4.27,79.14,102.72,22.12,30.30,11.61,16.28,368447.11

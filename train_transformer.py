@@ -1,6 +1,6 @@
-"""训练 TrafficTransformer.
+"""Train TrafficTransformer.
 
-用法: python train_transformer.py [--epochs 200] [--batch-size 64] ...
+Usage: python train_transformer.py [--epochs 200] [--batch-size 64] ...
 """
 
 import argparse
@@ -22,7 +22,7 @@ from models.transformer import TrafficTransformer, TransformerConfig
 
 
 def get_lr(step, total_steps, warmup_steps, base_lr, min_ratio=0.01):
-    """linear warmup + cosine decay 到 base_lr * min_ratio."""
+    """Linear warmup + cosine decay to base_lr * min_ratio."""
     if step < warmup_steps:
         return base_lr * step / max(1, warmup_steps)
     progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
@@ -64,9 +64,9 @@ def main():
     project_root = Path(__file__).resolve().parent
     pt_path = project_root / "data" / "processed" / "all.pt"
     if not pt_path.exists():
-        sys.exit(f"未找到 {pt_path}, 请先跑 prep.py")
+        sys.exit(f"Missing {pt_path}; please run prep.py first")
 
-    # 加载 scaler 参数 (供 metrics 反变换)
+    # Load scaler parameters (for inverse transformation during metrics)
     raw = torch.load(pt_path, map_location="cpu", weights_only=False)
     mean, std = raw["mean"], raw["std"]
 
@@ -142,10 +142,10 @@ def main():
         else:
             patience += 1
             if patience >= args.patience:
-                print(f"\nEarly stopping at epoch {epoch} (val 已 {args.patience} epoch 没改善)")
+                print(f"\nEarly stopping at epoch {epoch} (val has not improved for {args.patience} epochs)")
                 break
 
-    print(f"\n最佳 val loss: {best_val:.4f}, checkpoint: {ckpt_path}")
+    print(f"\nBest val loss: {best_val:.4f}, checkpoint: {ckpt_path}")
 
 
 if __name__ == "__main__":

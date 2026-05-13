@@ -1,23 +1,22 @@
-"""带宽分配的工程指标 (在真实 Mbps 空间计算).
+"""Bandwidth allocation evaluation metrics (computed in real-Mbps space).
 
-标准用法:
+Standard usage:
     metrics = compute_metrics(pred_z, target_z, mean, std, q_idx=2)
-        pred_z   [N, 462, 3]   模型输出 (log1p + z-score 空间)
-        target_z [N, 462]      真实流量 (log1p + z-score 空间)
-        mean,std [462]         scaler 参数 (来自 all.pt)
-        q_idx                  用哪个分位数作为带宽配额; 0=P50, 1=P90, 2=P95
+        pred_z   [N, 462, 3]   model output (log1p + z-score space)
+        target_z [N, 462]      actual traffic (log1p + z-score space)
+        mean,std [462]         scaler parameters (from all.pt)
+        q_idx                  which quantile is used as the allocation; 0=P50, 1=P90, 2=P95
 """
 
 import torch
 
 
 def inverse_transform(z: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
-    """z-score(log1p) -> 真实 Mbps, clamp 到 >= 0.
+    """z-score(log1p) -> real Mbps, clamped to >= 0.
 
-    约定: SD 对维度位于 axis -1 (2D 时) 或 axis 1 (3D+ 时, 即 batch 之后).
-        2D [T, P] 或 [B, P]:        默认广播即可
-        3D+ [B, P, ...]:           需把 mean/std 显式 reshape 成 [1, P, 1, ...]
-                                    再广播 (避免对齐到错误的最后一维)
+    Convention: SD-pair dim is axis -1 for 2D inputs, axis 1 for 3D+ inputs.
+        2D [T, P] or [B, P]:        default broadcast works
+        3D+ [B, P, ...]:            reshape mean/std to [1, P, 1, ...] to broadcast correctly
     """
     if z.ndim >= 3:
         shape = [1] * z.ndim
@@ -56,25 +55,17 @@ def compute_alloc_metrics(
     mean: torch.Tensor,
     std: torch.Tensor,
 ) -> dict:
-    """单分位场景: 模型输出直接当 alloc, 无 P50/P90, 不算 MAE_P50.
+    """Single-quantile setting: model output is the allocation directly,
+    no P50/P90, no MAE_P50.
 
-    alloc_z, target_z: same shape, 都是 z-score 空间.
-
-    返回的指标:
-      sla_violation_rate       违约频率 (target = 0.05)
-      utilization              带宽利用率 = sum(actual)/sum(alloc)
-      avg_wasted_mbps          平均浪费 (over-provisioning) per cell
-      avg_actual_mbps          actual 平均
-      avg_alloc_mbps           alloc 平均
-      avg_violation_size_mbps  违约时平均超出多少 Mbps (only over violations)
-      total_unmet_mbps         测试集累积未满足需求总量 (sum of violations)
+    alloc_z, target_z: same shape, both in z-score space.
     """
     alloc = inverse_transform(alloc_z, mean, std)
     actual = inverse_transform(target_z, mean, std)
 
     sum_actual = actual.sum().item()
     sum_alloc = alloc.sum().item()
-    diff = actual - alloc                       # > 0 时为违约量
+    diff = actual - alloc                       # > 0 indicates a violation magnitude
     violations = diff > 0
     n_viols = int(violations.sum().item())
 
@@ -96,14 +87,14 @@ def compute_alloc_metrics(
 if __name__ == "__main__":
     torch.manual_seed(0)
     N, P = 100, 462
-    # 模拟 mean / std (典型 log1p 空间)
+    # Simulated mean / std (typical log1p space)
     mean = torch.rand(P) * 5
     std = torch.rand(P) * 1.5 + 0.5
 
     target_real = torch.rand(N, P) * 100      # 0..100 Mbps
     target_z = (torch.log1p(target_real) - mean) / std
 
-    # 模拟模型输出: P50 接近真实, P95 偏高
+    # Simulated model output: P50 close to truth, P95 shifted upward
     noise = torch.randn(N, P) * 0.3
     pred_z = torch.stack([target_z + noise,
                           target_z + noise + 0.5,
@@ -114,7 +105,7 @@ if __name__ == "__main__":
     for k, v in m.items():
         print(f"  {k:24s} {v:>10.4f}")
 
-    # 多 horizon 测试
+    # Multi-horizon test
     H = 3
     target_real_mh = torch.rand(N, P, H) * 100
     target_z_mh = (torch.log1p(target_real_mh) - mean.view(1, -1, 1)) / std.view(1, -1, 1)

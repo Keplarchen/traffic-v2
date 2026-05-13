@@ -46,3 +46,10 @@ Thumbs.db
 
 # Local-only project notes
 PROJECT_CONTEXT.md
+
+# Runtime-generated artifacts (created by running the pipeline)
+data/
+checkpoints/
+eval/*/figures/
+eval/*/preds.npz
+eval/*/results.csv
